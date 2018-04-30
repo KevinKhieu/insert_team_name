@@ -21,7 +21,7 @@ import org.ggp.base.util.statemachine.implementation.prover.ProverStateMachine;
  * Searches entire move tree to play best move.
  *
  */
-public class INHTimeLimitedMMPlayer extends GGPlayer {
+public class INH_TimeLimitedMMPlayer2 extends GGPlayer {
 
 	private long currTimeout = 0;
 	private long TIME_LIMIT = 500;
@@ -41,7 +41,7 @@ public class INHTimeLimitedMMPlayer extends GGPlayer {
 	 * of your own player.
 	 */
 	public static void main(String[] args) {
-		Player.initialize(new INHTimeLimitedMMPlayer().getName());
+		Player.initialize(new INH_TimeLimitedMMPlayer2().getName());
 	}
 
 	private long getTime() {
@@ -58,14 +58,14 @@ public class INHTimeLimitedMMPlayer extends GGPlayer {
 			}
 		}
 		double myReward = reward(role, state, machine);
-		if (myReward >= 100) {
-			return 100;
-		}
-		double val1 = myReward - reward(opponent, state, machine);
+		//double val1 = myReward - reward(opponent, state, machine);
 		double val2 = mobility(role, state, machine) - mobility(opponent, state, machine);
-		double val = 2 * val1 + val2;
+		double val = myReward + val2;
 		if (val < 0) {
 			val = 0;
+		}
+		if (val > 100) {
+			val = 100;
 		}
 		return val;
 	}
@@ -79,7 +79,7 @@ public class INHTimeLimitedMMPlayer extends GGPlayer {
 				timeIsUp = true;
 			}
 		}
-		double val = reward(role, state, machine) + 3 * mobility(role, state, machine);
+		double val = reward(role, state, machine) + mobility(role, state, machine);
 		if (val < 0) {
 			val = 0;
 		}
@@ -125,7 +125,7 @@ public class INHTimeLimitedMMPlayer extends GGPlayer {
 
 	}
 
-	private double maxScore(Role role, MachineState state, StateMachine machine, int currDist, int maxDist, Move origMove)
+	private double maxScore(Role role, MachineState state, StateMachine machine, int currDist, int maxDist, Move origMove, double alpha, double beta)
 			throws TransitionDefinitionException, MoveDefinitionException, GoalDefinitionException{
 		if (findTerminalp(state, machine)) {
 			return findReward(role, state, machine);
@@ -134,36 +134,33 @@ public class INHTimeLimitedMMPlayer extends GGPlayer {
 		long timeLeft = getTime();
 		if (timeLeft < TIME_LIMIT || currDist == maxDist) {
 			double val = evalfn(role, state, machine);
-//			if (val < 99.99) {	// Stay Alive (short cut)
-//				val += 0.01;
-//			}
 			return val;
 		}
 
 		List<Move> legalMoves = findLegals(role, state, machine);
-		double score = 0;
+
 		for (int i = 0; i < legalMoves.size(); i++) {
-			double result = minScore(role, state, machine, legalMoves.get(i), currDist, maxDist, origMove);
-			if (result > score) {
-				score = result;
+			double result = minScore(role, state, machine, legalMoves.get(i), currDist + 1, maxDist, origMove, alpha, beta);
+			if (result > alpha) {
+				alpha = result;
 			}
-			if (score == 100) {
-				return 100;
+			if (alpha >= beta) {
+				return beta;
 			}
 		}
-		return score;
+		return alpha;//score;
 	}
 
 	// Only works for 2 player games rn!
-	private double minScore(Role role, MachineState state, StateMachine machine, Move action, int currDist, int maxDist, Move origMove)
+	private double minScore(Role role, MachineState state, StateMachine machine, Move action, int currDist, int maxDist, Move origMove, double alpha, double beta)
 			throws TransitionDefinitionException, MoveDefinitionException, GoalDefinitionException{
 
 		// get Opponents moves
 		List<Move> legalMoves = findLegals(opponent, state, machine);
-		double score = 100;
 
 		// For each move, see which one minimizes our score
 		for (int i = 0; i < legalMoves.size(); i++) {
+
 			List<Move> currMove = new ArrayList<Move>();
 			if (role.equals(roles.get(0))) {
 				currMove.add(action);
@@ -176,15 +173,19 @@ public class INHTimeLimitedMMPlayer extends GGPlayer {
 //			currMove.add(action);
 //			currMove.add(legalMoves.get(i));
 
-			double result = maxScore(role, findNext(currMove, state, machine), machine, currDist + 1, maxDist, origMove);
-			if (result < score) {
-				score = result;
+//			List<Move> currMove = new ArrayList<Move>();
+//			currMove.add(action);
+//			currMove.add(legalMoves.get(i));
+
+			double result = maxScore(role, findNext(currMove, state, machine), machine, currDist, maxDist, origMove, alpha, beta);
+			if (result < beta) {
+				beta = result;
 			}
-			if (score <= 0) {
-				return 0;
+			if (beta <= alpha) {
+				return alpha;
 			}
 		}
-		return score;
+		return beta; // score
 	}
 
 	private MachineState simulate(Move move, MachineState state, StateMachine machine)
@@ -201,9 +202,6 @@ public class INHTimeLimitedMMPlayer extends GGPlayer {
 		long timeLeft = getTime();
 		if (timeLeft < TIME_LIMIT) {
 			double val = evalfnCD(role, state, machine);
-//			if (val < 99.99) {
-//				val += 0.01;
-//			}
 			return val;
 		}
 
@@ -247,7 +245,6 @@ public class INHTimeLimitedMMPlayer extends GGPlayer {
 		return currMove;
 	}
 
-	///////
 	private Move minimax(long timeout, Role role, MachineState state, StateMachine machine, int curr, int distance)
 			throws TransitionDefinitionException, MoveDefinitionException, GoalDefinitionException {
 		//Gets all legal moves for our player in the current state
@@ -264,12 +261,11 @@ public class INHTimeLimitedMMPlayer extends GGPlayer {
 		double score = 0;
 		for (int i = 0; i < legalMoves.size(); i++) {
 			currMove = legalMoves.get(i);
-			double result = minScore(role, state, machine, currMove, curr, distance, currMove);
+			double result = minScore(role, state, machine, currMove, curr, distance + 1, currMove, 0, 100);
 			if (result > score){
 				score = result;
 				bestMove = currMove;
 				if (result == 100) {
-					//WON = true;
 					break;
 				}
 			}
@@ -288,9 +284,9 @@ public class INHTimeLimitedMMPlayer extends GGPlayer {
 		// If score is same as best so far, but we look further...
 		// or
 		// if score is better than our best saved score, but we've looked far ahead enough to not be naive
-//		if ((score == 100 && distance < bestSavedDepth) || (score == bestSavedScore && score != 100 && distance > bestSavedDepth) ||
-//				(score > bestSavedScore)) {
-		if ((score > bestSavedScore && distance > minDist) || (score == 100 && distance < bestSavedDepth)) {
+		//if ((score == 100 && distance < bestSavedDepth) || (score == bestSavedScore && score != 100 && distance < bestSavedDepth) ||
+			//	(score > bestSavedScore && distance > minDist)) {
+		if ((score == 100 && (bestSavedScore != 100 || distance < bestSavedDepth)) || (score > bestSavedScore && distance > minDist)) {
 			bestSavedScore = score;
 			bestSavedMove = bestMove;
 			bestSavedDepth = distance;
@@ -310,6 +306,9 @@ public class INHTimeLimitedMMPlayer extends GGPlayer {
 		for (int distance = 1; distance < 700 && !timeIsUp; distance++) {
 			bestMove = minimax(timeout, role, state, machine, 0, distance);
 			if (bestSavedScore == 100) {
+				System.out.println("Best Saved Score is 100!");
+				System.out.println("I am playing: " + bestSavedMove);
+				System.out.println("Best Saved Depth: " + bestSavedDepth);
 				return bestSavedMove;
 			}
 		}
@@ -381,6 +380,6 @@ public class INHTimeLimitedMMPlayer extends GGPlayer {
 	 */
 	@Override
 	public String getName() {
-		return "INHTimeLimitedMM_player";
+		return "INH_TimeLimited_AlphaBetaPlayer";
 	}
 }
