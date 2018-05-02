@@ -1,4 +1,5 @@
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import org.ggp.base.apps.player.Player;
@@ -23,8 +24,11 @@ public class INHMonteCarloTreeSearchImprovedPlayer extends GGPlayer {
 	class Node {
 		public boolean expanded = false;  // Meant for checking whether we should expand on node
 		public double utility = 0;
+		public double score = 0;
 		public int visits = 0;
 
+		public boolean isTerminal = false;
+		public boolean isSolved = false;
 
 		public Move previousPlayerMove;  // Move made by our player previously (for max nodes)
 
@@ -82,7 +86,7 @@ public class INHMonteCarloTreeSearchImprovedPlayer extends GGPlayer {
 
 		private Node selectHelper(Node node)
 				throws MoveDefinitionException, TransitionDefinitionException {
-			if (node == null) {
+			if (node == null || node.isSolved) {
 				return null;
 			}
 			if (node.visits == 0) {
@@ -90,6 +94,9 @@ public class INHMonteCarloTreeSearchImprovedPlayer extends GGPlayer {
 			}
 			for (int i = 0; i < node.children.size(); i++) {
 				Node childNode = node.children.get(i);
+				if (childNode.isSolved) {
+					continue;
+				}
 				for (int j = 0; j < childNode.children.size(); j++) {
 					Node grandChildNode = childNode.children.get(j);
 					if (grandChildNode.visits == 0) {
@@ -104,6 +111,9 @@ public class INHMonteCarloTreeSearchImprovedPlayer extends GGPlayer {
 
 			for (int i = 0; i < node.children.size(); i++) {
 				Node childNode = node.children.get(i);
+				if (childNode.isSolved) {
+					continue;
+				}
 				double newScore = selectFn(childNode);
 				if (!findTerminalp(childNode.state, this.machine) && (firstResult == null || newScore > score)) {
 					score = newScore;
@@ -121,6 +131,9 @@ public class INHMonteCarloTreeSearchImprovedPlayer extends GGPlayer {
 
 			for (int j = 0; j < firstResult.children.size(); j++) {
 				Node grandChildNode = firstResult.children.get(j);
+				if (grandChildNode.isSolved) {
+					continue;
+				}
 				double newScore = selectFn(grandChildNode);
 				if (!findTerminalp(grandChildNode.state, this.machine) && (secondResult == null || newScore > score)) {
 					score = newScore;
@@ -131,21 +144,16 @@ public class INHMonteCarloTreeSearchImprovedPlayer extends GGPlayer {
 			return selectHelper(secondResult);
 		}
 
-		/**
-		 *
-		 * @param node
-		 * @throws MoveDefinitionException
-		 * @throws TransitionDefinitionException
-		 *
-		 * Takes a given node and expands it down to its grand-children.  Function assumes that the
-		 * given node is a max node.
-		 */
 		public void expand(Node node)
 				throws MoveDefinitionException, TransitionDefinitionException {
 			if (node.expanded) {
 				return;
 			}
-			expandMax(node);
+			if (findTerminalp(node.state, this.machine)) {
+				node.isTerminal = true;
+			} else {
+				expandMax(node);
+			}
 			node.expanded = true;
 		}
 
@@ -155,6 +163,9 @@ public class INHMonteCarloTreeSearchImprovedPlayer extends GGPlayer {
 
 		public double simulate(Node node, int count)
 				throws MoveDefinitionException, TransitionDefinitionException, GoalDefinitionException {
+			if (node.isTerminal) {
+				return depthCharge(this.playerRole, node.state, this.machine);
+			}
 			double total = 0;
 			for (int i = 0; i < count; i++) {
 				total = total + depthCharge(this.playerRole, node.state, this.machine);
@@ -162,40 +173,51 @@ public class INHMonteCarloTreeSearchImprovedPlayer extends GGPlayer {
 			return total / count;
 		}
 
-		public void backpropagate(Node node, double score) {
+		public void backpropagate(Node node, double score, boolean isSolvedScore) {
 			node.visits++;
-			/*
 			node.utility += score;
-			if (node.parent != null) {
-				backpropagate(node.parent, score);
-			}
-			*/
-			/**/
-			if (node.children.size() == 0) {
-				node.utility = score;
-			} else if (node.isMaxNode) {
-				double utility = score;
-				for (int i = 0; i < node.children.size(); i++) {
-					double candidate = node.children.get(i).utility;
-					if (candidate > utility) {
-						utility = candidate;
+			if (node.isTerminal) {
+				node.score = score;
+				node.isSolved = true;
+			} else if (isSolvedScore) {
+				boolean solved = true;
+				node.score = score;
+				if (node.isMaxNode) {
+					for (int i = 0; i < node.children.size(); i++) {
+						Node childNode = node.children.get(i);
+						if (!childNode.isSolved) {
+							solved = false;
+						}
+						if (childNode.score > node.score) {
+							node.score = childNode.score;
+						}
+						if (node.score >= 100) {
+							solved = true;
+							break;
+						}
+					}
+				} else {
+					for (int i = 0; i < node.children.size(); i++) {
+						Node childNode = node.children.get(i);
+						if (!childNode.isSolved) {
+							solved = false;
+						}
+						if (childNode.score < node.score) {
+							node.score = childNode.score;
+						}
+						if (node.score <= 0) {
+							solved = true;
+							break;
+						}
 					}
 				}
-				node.utility = utility;
-			} else {
-				double utility = score;
-				for (int i = 0; i < node.children.size(); i++) {
-					double candidate = node.children.get(i).utility;
-					if (candidate < utility && node.children.get(i).visits > 0) {
-						utility = candidate;
-					}
+				if (solved) {
+					node.isSolved = true;
 				}
-				node.utility = utility;
 			}
 			if (node.parent != null) {
-				backpropagate(node.parent, node.utility);
+				backpropagate(node.parent, score, node.isSolved);
 			}
-			/**/
 		}
 
 		public Move chooseCurrBestMove() {
@@ -205,11 +227,9 @@ public class INHMonteCarloTreeSearchImprovedPlayer extends GGPlayer {
 				Node childNode = rootNode.children.get(i);
 				if (childNode.visits > 0) {
 					double score = childNode.utility / childNode.visits;
-					System.out.println("Utility considered: " + childNode.utility);
-					System.out.println("Move: " + childNode.previousPlayerMove);
-					System.out.println("Visits: " + childNode.visits);
-					System.out.println("Scaled utility considered: " + score);
-					score = childNode.utility;
+					if (childNode.isSolved) {
+						score = childNode.score;
+					}
 					if (score > bestScore) {
 						bestScore = score;
 						bestMove = childNode.previousPlayerMove;
@@ -218,11 +238,59 @@ public class INHMonteCarloTreeSearchImprovedPlayer extends GGPlayer {
 			}
 			return bestMove;
 		}
+		public boolean verifyTreeHelper(Node node, int depth) {
+			char[] c = new char[2 * depth];
+			Arrays.fill(c,  '-');
+			String tabs = new String(c);
+			System.out.println(tabs + "Subtree root node - maxNode: " + node.isMaxNode + ", num children: " + node.children.size() + ", utility: " + node.utility + ", is solved: " + node.isSolved + ", score: " + node.score + ", visits: " + node.visits);
+			int numVisitedChildren = 0;
+			for (int i = 0; i < node.children.size(); i++) {
+				if (node.children.get(i).visits > 0) {
+					numVisitedChildren++;
+				}
+			}
+			if (numVisitedChildren == 0) {
+				return true;
+			}
+			boolean found = false;
+			for (int i = 0; i < node.children.size(); i++) {
+				Node childNode = node.children.get(i);
+				if (childNode.visits == 0) {
+					continue;
+				}
+				if (!verifyTreeHelper(childNode, depth + 1)) {
+					return false;
+				}
+				if (node.isMaxNode && childNode.utility > node.utility) {
+					System.out.println(tabs + "Node is of type max but utility is " + node.utility + " while child node utility is: " + childNode.utility);
+					return false;
+				}
+				if (!node.isMaxNode && childNode.utility < node.utility) {
+					System.out.println(tabs + "Node is of type min but utility is " + node.utility + " while child node utility is: " + childNode.utility);
+					return false;
+				}
+				if (node.utility == childNode.utility) {
+					found = true;
+				}
+			}
+			if (!found) {
+				System.out.println("Node utility doesn't match any of the children utilities");
+			}
+			return found;
+		}
+
+		public boolean verifyTree() {
+			return verifyTreeHelper(this.rootNode, 0);
+		}
+
+		public boolean isSolved() {
+			return this.rootNode.isSolved;
+		}
 	}
 
 	private long TIME_LIMIT = 3000;
 	private long currTimeout = 0;
-	private int numSimulations = 25;
+	private int numSimulations = 10;
 
 	private boolean doWeHaveTime() {
 		return (currTimeout - System.currentTimeMillis()) > TIME_LIMIT;
@@ -307,18 +375,30 @@ public class INHMonteCarloTreeSearchImprovedPlayer extends GGPlayer {
 		this.currTimeout = timeout;
 
 		while (doWeHaveTime()) {
+			if (tree.isSolved()) {
+				System.out.println("Solved!!!");
+				break;
+			}
 			Node selectedNode = tree.select();
 			if (selectedNode == null) {
 				break;
 			}
 			tree.expand(selectedNode);
 			double score = tree.simulate(selectedNode, this.numSimulations);
-			tree.backpropagate(selectedNode, score);
+			tree.backpropagate(selectedNode, score, false);
 		}
 		Move bestMove = tree.chooseCurrBestMove();
 		if (bestMove == null) {
 			bestMove = legalMoves.get(0);
 		}
+		/*
+		if (!tree.verifyTree()) {
+			System.out.println("Tree is malformed!");
+		} else {
+			System.out.println("Tree look good!");
+		}
+		*/
+
 
 		System.out.println("I am playing: " + bestMove);
 		return bestMove;
