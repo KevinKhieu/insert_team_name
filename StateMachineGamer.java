@@ -275,8 +275,10 @@ public abstract class StateMachineGamer extends Gamer
 			List<GdlLiteral> rulePBody = ruleP.getBody();
 			List<GdlLiteral> ruleQBody = ruleQ.getBody();
 
-			if (al != false  && subsumesExp(rulePBody.subList(2, rulePBody.size()),
-											ruleQBody.subList(2, ruleQBody.size()), al)) {
+			// I believe that these slices should start at index 0 b/c of the weird way
+			// that rule is defined in the pseudocode (see comments @ 169)
+			if (al != false  && subsumesExp(rulePBody.subList(0, rulePBody.size()),
+									ruleQBody.subList(0, ruleQBody.size()), al)) {
 				return true;
 			}
 		}
@@ -288,13 +290,13 @@ public abstract class StateMachineGamer extends Gamer
 		if (pl.length==0) {
 			return true;
 		}
-		for (int i=0; i<ql.length; i++) {
-			var bl = match(pl[0],ql[i],al);
-			if (bl!= false && subsumesexp(pl.slice(1),ql,bl)) {
-				return true;
-			}
-		}
-		return false;
+//		for (int i=0; i<ql.length; i++) {
+//			var bl = match(pl[0],ql[i],al);
+//			if (bl!= false && subsumesexp(pl.slice(1),ql,bl)) {
+//				return true;
+//			}
+//		}
+//		return false;
 	}
 
     // =====================================================================
