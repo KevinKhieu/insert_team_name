@@ -8,11 +8,23 @@ import org.ggp.base.player.gamer.exception.AbortingException;
 import org.ggp.base.player.gamer.exception.MetaGamingException;
 import org.ggp.base.player.gamer.exception.MoveSelectionException;
 import org.ggp.base.player.gamer.exception.StoppingException;
+import org.ggp.base.util.gdl.GdlUtils;
 import org.ggp.base.util.gdl.grammar.Gdl;
+import org.ggp.base.util.gdl.grammar.GdlConstant;
+import org.ggp.base.util.gdl.grammar.GdlDistinct;
+import org.ggp.base.util.gdl.grammar.GdlFunction;
 import org.ggp.base.util.gdl.grammar.GdlLiteral;
+import org.ggp.base.util.gdl.grammar.GdlNot;
+import org.ggp.base.util.gdl.grammar.GdlOr;
+import org.ggp.base.util.gdl.grammar.GdlPool;
+import org.ggp.base.util.gdl.grammar.GdlProposition;
+import org.ggp.base.util.gdl.grammar.GdlRelation;
 import org.ggp.base.util.gdl.grammar.GdlRule;
+import org.ggp.base.util.gdl.grammar.GdlSentence;
 import org.ggp.base.util.gdl.grammar.GdlTerm;
+import org.ggp.base.util.gdl.grammar.GdlVariable;
 import org.ggp.base.util.logging.GamerLogger;
+import org.ggp.base.util.prover.aima.substitution.Substitution;
 import org.ggp.base.util.statemachine.MachineState;
 import org.ggp.base.util.statemachine.Move;
 import org.ggp.base.util.statemachine.Role;
@@ -20,8 +32,6 @@ import org.ggp.base.util.statemachine.StateMachine;
 import org.ggp.base.util.statemachine.exceptions.GoalDefinitionException;
 import org.ggp.base.util.statemachine.exceptions.MoveDefinitionException;
 import org.ggp.base.util.statemachine.exceptions.TransitionDefinitionException;
-
-import com.google.common.collect.ImmutableList;
 
 
 /**
@@ -166,63 +176,6 @@ public abstract class StateMachineGamer extends Gamer
         role = stateMachine.getRoleFromConstant(getRoleName());
 	}
 
-	// my impression is that in the pseudocode, rule[0] is always 'rule'
-	// rule[1] refers to the head
-	// and rule[2] is the first thing in the body
-
-	// for example for the rule ( <= ( base ( cell ?M ?N x ) ) ( index ?M ) ( index ?N ) )
-	// head is ( base ( cell ?M ?N x ) )
-	// and the two elements in the body are ( index ?M ) and ( index ?N )
-	private Gdl pruneSubgoals(Gdl rule) {
-		if (rule instanceof GdlRule) {
-			GdlRule ruleToPrune = (GdlRule)rule;
-			List<GdlLiteral> oldBody = ruleToPrune.getBody();
-			List<GdlLiteral> vl = new ArrayList<GdlLiteral>();
-			List<GdlLiteral> newBody = new ArrayList<GdlLiteral>();
-			vl.add(ruleToPrune.get(0));
-			newBody.add(ruleToPrune.get(0));
-			for (int i=1; i<oldBody.size(); i++) {
-				List<GdlLiteral> sl = new ArrayList<GdlLiteral>(newBody.subList(0, newBody.size()));
-				sl.addAll(oldBody.subList(i+1, oldBody.size()));
-				if (!pruneworthyp(sl,ruleToPrune.get(i),vl)) {
-					newBody.add(ruleToPrune.get(i));
-				}
-			}
-			// create a new rule with same head and the new body
-			GdlRule newRule = new GdlRule(ruleToPrune.getHead(), ImmutableList.copyOf(newBody));
-			return newRule;
-		}
-		return rule;
-	}
-
-	// takes an expression and a variable list as arguments and adds to the list any variables
-	// in the expression that are not already on the list
-	private List<GdlLiteral> varsexp(List<GdlLiteral> expression, List<GdlLiteral> variableList) {
-		for (GdlLiteral var : expression) {
-			if (!variableList.contains(var)) {
-				variableList.add(var);
-			}
-		}
-		return variableList;
-	}
-
-	// sublis takes an expression and a binding list as arguments and returns a copy of
-	// the expressions with variables on the binding list replaced with their values
-	private GdlLiteral sublis(GdlLiteral p, al) {
-
-	}
-
-	private boolean pruneworthyp(List<GdlLiteral> sl, GdlLiteral p, List<GdlLiteral> vl) {
-//		vl = varsexp(sl,vl.slice(0));
-//		var al = seq();
-//		for (int i=0; i<vl.length; i++) {
-//			al[vl[i]] = 'x' + i;
-//		}
-//		var facts = sublis(sl,al);
-//		var goal = sublis(p,al);
-//		return compfindp(goal,facts,seq());
-	}
-
 	private List<Gdl> pruneRules(List<Gdl> rules) {
 		List<Gdl> newRules = new ArrayList<Gdl>();
 		for (int i=0; i<rules.size(); i++) {
@@ -231,12 +184,12 @@ public abstract class StateMachineGamer extends Gamer
 				newRules.add(rules.get(i));
 			}
 		}
-	  return newRules;
+		return newRules;
 	}
 
 	private boolean subsumedp(Gdl rule, List<Gdl> rules) {
 		for (int i=0; i<rules.size(); i++) {
-			if (subsumesp(rules.get(i), rule)) {
+			if (subsumesP(rules.get(i), rule)) {
 				return true;
 			}
 		}
@@ -246,57 +199,232 @@ public abstract class StateMachineGamer extends Gamer
 	// If the first expression can be made to look like the second by binding
 	// the variables in the first expression, then the method returns a binding
 	// list for those variables; otherwise, it returns false.
+	private Substitution matcher(Gdl p, Gdl q) {
+		List<GdlVariable> pVars = GdlUtils.getVariables(p);
+		List<GdlVariable> qVars = GdlUtils.getVariables(q);
 
-	// ??? how to do this? regex?
-	// what even is the return type supposed to be..
-	private boolean matcher(GdlLiteral p, GdlLiteral q) {
-		if (p == q) return true;
-		return false;
+		if (pVars.size() == 0 || qVars.size() == 0 || pVars.size() != qVars.size()) {
+			return null;
+		}
+		Substitution theta = new Substitution();
+		for (int i = 0; i < pVars.size(); i++) {
+			theta.put(pVars.get(i), qVars.get(i));
+		}
+
+		if (p instanceof GdlLiteral && q instanceof GdlLiteral) {
+			GdlLiteral pNew = substitute((GdlLiteral)p, theta);
+			GdlLiteral qNew = substitute((GdlLiteral)q, theta);
+			if (pNew.equals(qNew)) {
+				return theta;
+			}
+		}
+		return null;
 	}
 
 	// does the same thing as matcher but starts with the bindings on the
 	// given binding list al
-	private boolean match(GdlLiteral p, GdlLiteral q, al) {
+	private Substitution match(GdlLiteral p, GdlLiteral q, Substitution al) {
 
+		List<GdlVariable> pVars = GdlUtils.getVariables(p);
+		List<GdlVariable> qVars = GdlUtils.getVariables(q);
+
+		if (pVars.size() == 0 || qVars.size() == 0 || pVars.size() != qVars.size()) {
+			return null;
+		}
+		for (int i = 0; i < pVars.size(); i++) {
+			if (!al.contains(pVars.get(i))) {
+				al.put(pVars.get(i), qVars.get(i));
+			}
+		}
+		if (p instanceof GdlLiteral && q instanceof GdlLiteral) {
+			GdlLiteral pNew = substitute((GdlLiteral)p, al);
+			GdlLiteral qNew = substitute((GdlLiteral)q, al);
+			if (pNew.equals(qNew)) {
+				return al;
+			}
+		}
+		return null;
 	}
 
-	private boolean subsumesp(Gdl p, Gdl q) {
-		if (p == q) {
+	private boolean subsumesP(Gdl p, Gdl q) {
+		if (p.equals(q)) {
 			return true;
 		}
-		if (p instanceof GdlLiteral || q instanceof GdlLiteral) {
-			return false;
-		}
-		GdlRule ruleP = (GdlRule)p;
-		GdlRule ruleQ = (GdlRule)q;
+		if ((p instanceof GdlConstant) || (q instanceof GdlConstant)) {
+            return false;
+        }
+		else if (p instanceof GdlRule && q instanceof GdlRule) {
+			GdlRule ruleP = (GdlRule)p;
+			GdlRule ruleQ = (GdlRule)q;
 
-		if (ruleP.get(0) instanceof GdlLiteral && ruleQ.get(0) instanceof GdlLiteral) {
-			boolean al = matcher(ruleP.get(0), ruleQ.get(0));
+			Substitution al = matcher(ruleP.getHead(), ruleQ.getHead());
 			List<GdlLiteral> rulePBody = ruleP.getBody();
 			List<GdlLiteral> ruleQBody = ruleQ.getBody();
 
-			// I believe that these slices should start at index 0 b/c of the weird way
-			// that rule is defined in the pseudocode (see comments @ 169)
-			if (al != false  && subsumesExp(rulePBody.subList(0, rulePBody.size()),
-									ruleQBody.subList(0, ruleQBody.size()), al)) {
+			if (al != null && subsumesExp(rulePBody, ruleQBody, al)) {
 				return true;
 			}
 		}
 		return false;
 	}
 
-	// (I think) it would make sense for al (the bindings) to be a map?
-	private boolean subsumesExp(List<GdlLiteral> pl, List<GdlLiteral> ql, al) {
-		if (pl.length==0) {
+	private boolean subsumesExp(List<GdlLiteral> pl, List<GdlLiteral> ql, Substitution al) {
+		if (pl.size() == 0) {
 			return true;
 		}
-//		for (int i=0; i<ql.length; i++) {
-//			var bl = match(pl[0],ql[i],al);
-//			if (bl!= false && subsumesexp(pl.slice(1),ql,bl)) {
-//				return true;
-//			}
-//		}
-//		return false;
+		for (int i=0; i<ql.size(); i++) {
+			Substitution bl = match(pl.get(0), ql.get(i), al);
+			if (bl != null && subsumesExp(pl.subList(1, pl.size()), ql, bl)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	public static GdlLiteral substitute(GdlLiteral literal, Substitution theta) {
+		return substituteLiteral(literal, theta);
+	}
+
+	public static GdlSentence substitute(GdlSentence sentence, Substitution theta) {
+		return substituteSentence(sentence, theta);
+	}
+
+	public static GdlRule substitute(GdlRule rule, Substitution theta) {
+		return substituteRule(rule, theta);
+	}
+
+	private static GdlConstant substituteConstant(GdlConstant constant, Substitution theta) {
+		return constant;
+	}
+
+	private static GdlDistinct substituteDistinct(GdlDistinct distinct, Substitution theta) {
+		if (distinct.isGround()) {
+			return distinct;
+		}
+		else {
+			GdlTerm arg1 = substituteTerm(distinct.getArg1(), theta);
+			GdlTerm arg2 = substituteTerm(distinct.getArg2(), theta);
+			return GdlPool.getDistinct(arg1, arg2);
+		}
+	}
+
+	private static GdlFunction substituteFunction(GdlFunction function, Substitution theta)
+	{
+		if (function.isGround()) {
+			return function;
+		}
+		else {
+			GdlConstant name = substituteConstant(function.getName(), theta);
+
+			List<GdlTerm> body = new ArrayList<GdlTerm>();
+			for (int i = 0; i < function.arity(); i++) {
+				body.add(substituteTerm(function.get(i), theta));
+			}
+
+			return GdlPool.getFunction(name, body);
+		}
+	}
+
+	private static GdlLiteral substituteLiteral(GdlLiteral literal, Substitution theta) {
+		if (literal instanceof GdlDistinct) {
+			return substituteDistinct((GdlDistinct) literal, theta);
+		}
+		else if (literal instanceof GdlNot) {
+			return substituteNot((GdlNot) literal, theta);
+		}
+		else if (literal instanceof GdlOr) {
+			return substituteOr((GdlOr) literal, theta);
+		}
+		else {
+			return substituteSentence((GdlSentence) literal, theta);
+		}
+	}
+
+	private static GdlNot substituteNot(GdlNot not, Substitution theta) {
+		if (not.isGround()) {
+			return not;
+		}
+		else {
+			GdlLiteral body = substituteLiteral(not.getBody(), theta);
+			return GdlPool.getNot(body);
+		}
+	}
+
+	private static GdlOr substituteOr(GdlOr or, Substitution theta) {
+		if (or.isGround()) {
+			return or;
+		}
+		else {
+			List<GdlLiteral> disjuncts = new ArrayList<GdlLiteral>();
+			for (int i = 0; i < or.arity(); i++) {
+				disjuncts.add(substituteLiteral(or.get(i), theta));
+			}
+
+			return GdlPool.getOr(disjuncts);
+		}
+	}
+
+	private static GdlProposition substituteProposition(GdlProposition proposition, Substitution theta) {
+		return proposition;
+	}
+
+	private static GdlRelation substituteRelation(GdlRelation relation, Substitution theta) {
+		if (relation.isGround()) {
+			return relation;
+		}
+		else {
+			GdlConstant name = substituteConstant(relation.getName(), theta);
+
+			List<GdlTerm> body = new ArrayList<GdlTerm>();
+			for (int i = 0; i < relation.arity(); i++) {
+				body.add(substituteTerm(relation.get(i), theta));
+			}
+
+			return GdlPool.getRelation(name, body);
+		}
+	}
+
+	private static GdlSentence substituteSentence(GdlSentence sentence, Substitution theta) {
+		if (sentence instanceof GdlProposition) {
+			return substituteProposition((GdlProposition) sentence, theta);
+		}
+		else {
+			return substituteRelation((GdlRelation) sentence, theta);
+		}
+	}
+
+	private static GdlTerm substituteTerm(GdlTerm term, Substitution theta) {
+		if (term instanceof GdlConstant) {
+			return substituteConstant((GdlConstant) term, theta);
+		}
+		else if (term instanceof GdlVariable) {
+			return substituteVariable((GdlVariable) term, theta);
+		}
+		else {
+			return substituteFunction((GdlFunction) term, theta);
+		}
+	}
+
+	private static GdlTerm substituteVariable(GdlVariable variable, Substitution theta) {
+		if (!theta.contains(variable)) {
+			return variable;
+		}
+		else {
+			GdlTerm result = theta.get(variable);
+			theta.put(variable, result);
+			return result;
+		}
+	}
+
+	private static GdlRule substituteRule(GdlRule rule, Substitution theta) {
+		GdlSentence head = substitute(rule.getHead(), theta);
+
+		List<GdlLiteral> body = new ArrayList<GdlLiteral>();
+		for ( GdlLiteral literal : rule.getBody() ) {
+			body.add(substituteLiteral(literal, theta));
+		}
+
+		return GdlPool.getRule(head, body);
 	}
 
     // =====================================================================
@@ -317,11 +445,8 @@ public abstract class StateMachineGamer extends Gamer
 		try
 		{
 			stateMachine = getInitialStateMachine();
-//			pruneRules(getMatch().getGame().getRules());
-			for (Gdl g : getMatch().getGame().getRules()) {
-				pruneSubgoals(g);
-			}
-			stateMachine.initialize(getMatch().getGame().getRules());
+
+			stateMachine.initialize(pruneRules(getMatch().getGame().getRules()));
 			currentState = stateMachine.getInitialState();
 
 			role = stateMachine.getRoleFromConstant(getRoleName());
